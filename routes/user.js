@@ -3,12 +3,12 @@
  * User Controller
  */
 
-var mongoose = require('mongoose'), schema = mongoose.Schema, oId = schema.ObjectId, userSchema, model;
+var mongoose = require('mongoose'), schema = mongoose.Schema, userSchema, model;
 	userSchema = new schema({
-		email: {type: String, lowercase:true, trim: true, required: true, index:{unique:true}},
+		email: {type: String, lowercase:true, trim: true, required: true, unique: true, index: true},
 		first_name: String,
 		last_name: String,
-		password: String,
+		password: {type: String, required: true},
 		date_added: Date,
 		last_mod: Date
 	});
@@ -20,49 +20,60 @@ exports.index = function(req, res){
 	mongoose.connect('mongodb://localhost/user');
 	
 	function handleError (err) {
+		console.log('error');
 		console.log(err);
 		mongoose.disconnect();
-		res.send(JSON.stringify({error:true}));
+		res.send(JSON.stringify(err));
 	}
 	
   switch (req.method) {
   case 'GET':
-	  model.findById(query.id, function (err, user) {
-		  if (err) {
-			  handleError(err);
-		  }
+	  model.findById(query._id, function (err, user) {
+		  if (err) return handleError(err);
 		  mongoose.disconnect();
 		  res.send(JSON.stringify(user));
 	  });
 	  break;
   case 'PUT':
   case 'POST':
-	  var data = req.body;
-	  user = (data._id)? model.find({'_id':data._id}) : new model();
-	  user.set('email', data.email);
-	  user.set('first_name', data.first_name);
-	  user.set('last_name', data.last_name);
-	  user.set('date_added', data.date_added || Date.now());
-	  user.set('last_mod', Date.now());
-	  user.save(function (err) {
-		  handleError(err);
+	  var data = req.body, update = {}, required = model.schema.requiredPaths(), errors = [];
+	  
+	  // validation
+	  model.schema.eachPath(function (key, val) {
+		  if (data[key]) update[key] = data[key];
 	  });
-	  mongoose.disconnect();
-	  res.send(JSON.stringify(user));
+	  for (var i = 0; i < required.length; i++) {
+		  if (!update[required[i]] || update[required[i]] == "" || update[required[i]] == null) {
+			  errors.push(required[i] + " is required");
+		  }
+	  }
+	  if (errors.length > 0) return handleError({message:errors.join(', ')});
+	  
+	  update.date_added = update.date_added ? update.date_added : Date.now();
+	  update.last_mod = Date.now();
+	  
+	  model.findByIdAndUpdate(
+			  data._id || new mongoose.Types.ObjectId, 
+			  update, 
+			  {"upsert":true, "new":true},
+			  function (err, user) {
+				  if (err) return handleError(err);
+				  mongoose.disconnect();
+				  res.send(JSON.stringify(user));
+			  }
+	  );
 	  break;
   case 'DELETE':
-	  model.findById(query.id, function (err, user) {
+	  model.findById(query._id, function (err, user) {
 		  user.remove(function (err, user) {
-			  if (err) {
-				  handleError(err);
-			  }
+			  if (err) return handleError(err);
 			  mongoose.disconnect();
 			  res.send(JSON.stringify(user));
 		  });
 	  });
 	  break;
   case 'default':
-	  handleError({});
+	  handleError({message:'method not allowed'});
 	  break;
   }
 };
